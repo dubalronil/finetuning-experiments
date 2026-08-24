@@ -1,0 +1,4 @@
+# Experiment 001 — base model baseline (Qwen3-0.6B-Base)
+# Apple Silicon / macOS: default PyPI wheels are arm64 with MPS support.
+torch==2.13.0
+transformers==5.15.1
