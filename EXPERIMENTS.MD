@@ -83,6 +83,9 @@ Same as Experiment 001.
 - 3 failures had wrong field values.
 - 1 failure used the wrong schema.
 - The original T7 failure mode — omitting `carrier` — disappeared completely.
+- OnTrac was not generally difficult: T7 with OnTrac scored 6/6.
+- T8 with OnTrac scored 2/5.
+- This suggests the remaining failure is an interaction between OnTrac and T8's ambiguous `to {carrier} ... to {customer}` structure, rather than insufficient exposure to OnTrac itself.
 
 ### Takeaway
 
@@ -95,3 +98,46 @@ The remaining errors are now a different failure mode: on some T8 examples, the 
 ### Next
 
 Investigate the remaining T8 failures before changing model capacity or hyperparameters.
+
+## Experiment 003 — Role disambiguation
+
+### Question
+
+Can training examples with both carrier/customer `to` orderings eliminate the remaining T8 role confusion?
+
+### Change from Experiment 002
+
+Added 40 examples:
+
+- T12: 20 examples
+- T13: 20 examples
+- Opposite carrier/customer ordering around `to`
+- 4 examples per carrier per template
+
+The original 280 Experiment 002 rows remain byte-for-byte unchanged.
+
+### Results
+
+| Epoch | Train Loss | Val Loss | JSON Valid |  Exact |
+| ----- | ---------: | -------: | ---------: | -----: |
+| 1     |     0.0948 |   0.0015 |     100.0% | 100.0% |
+| 2     |     0.0002 |   0.0003 |     100.0% | 100.0% |
+| 3     |     0.0001 |   0.0003 |     100.0% | 100.0% |
+
+### Diagnosis
+
+- T7: 30/30 correct
+- T8: 30/30 correct
+- JSON validity: 100%
+- All four Experiment 002 T8 failures disappeared.
+- The previous customer/carrier swap failure mode was no longer observed on validation.
+
+### Takeaway
+
+Validation exact accuracy increased from 93.3% to 100.0%. The four remaining T8 failures from Experiment 002 disappeared after adding examples that prevented the model from relying on a fixed `to`-position shortcut.
+
+This shows that targeted training-data diversity can correct specific learned shortcuts without increasing LoRA capacity.
+
+### Next
+
+Evaluate on new held-out sentence structures to determine whether the customer/carrier role distinction generalized beyond T12/T13 and the existing validation templates.
