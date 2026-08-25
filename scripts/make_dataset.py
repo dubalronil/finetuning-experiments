@@ -6,7 +6,8 @@ emitted from the same base draw, so every experiment's val/test are byte-identic
 each train.jsonl is the previous one with rows appended - nothing rewritten.
 
 Builds 600 records for exp001, 640 for exp002 and 680 for exp003 by filling sentence
-templates with made-up values, plus a 100-row held-out role probe (see PROBE below).
+templates with made-up values, plus two evaluation-only sets: a 100-row held-out role
+probe and a 150-row T8 diagnostic (see PROBE and DIAG below).
 The point of synthetic data is that ground truth is CONSTRUCTED rather than
 labelled, so it is correct by definition - there is no annotation noise to argue
 with when a model gets something wrong.
@@ -151,6 +152,28 @@ PROBE_LAST = ["Adeyemi", "Bergstrom", "Costa", "Delacroix", "Eriksen",
 PROBE_SPEC = {"P1": (50, (10000, 12000), date(2026, 1, 1), 180, 9101),
               "P2": (50, (12000, 14000), date(2026, 1, 1), 180, 9102)}
 
+# --- T8 diagnostic -----------------------------------------------------------------
+# Also evaluation-only. exp002 scored 26/30 on val's T8, but 30 examples put the 95%
+# interval at [70.3%, 94.7%] - too wide to tell a real weakness from an unlucky draw.
+# 150 rows narrow that to a few points, which separates "true rate ~87%, expect ~20
+# failures" from "true rate ~98%, expect ~3". Decoding is greedy and deterministic, so
+# both adapters see the identical sentences and the comparison is paired per example.
+#
+# The template is T8's string EXACTLY - this measures T8, not a paraphrase of it - and
+# template_id stays "T8" so the per-template line reads straight against the val number.
+# Only the contents are new. Note "handed" and "for delivery to" appear in 0 of exp003's
+# 320 training rows, so T8 stays lexically novel even after T12/T13.
+DIAG_OUT = Path("data/diag_t8")
+DIAG_TEMPLATE = TEMPLATES["val"]["T8"]
+# A third surname list, for the same reason PROBE_LAST exists: the 120-name pool is fully
+# consumed, and `names` cannot be extended without reshuffling every existing file. These
+# never enter `names` or `probe_names`.
+DIAG_LAST = ["Karlsen", "Lindqvist", "Moreau", "Nakamura", "Okafor",
+             "Pettersen", "Quintana", "Rasmussen", "Sorensen", "Thibault"]
+# n, order-id range, first date, span in days, seed. Ids start past the probe's 13986 and
+# dates sit in 2027 - one year per artifact: 2024 train, 2025 val/test, 2026 probe.
+DIAG_SPEC = (150, (14000, 17000), date(2027, 1, 1), 180, 9201)
+
 # 12 first names x 10 last names = 120 unique full names, shuffled once with a fixed
 # seed and then sliced into disjoint pools. Name COMPONENTS recur across splits (train
 # may hold "Priya Raman", test "Priya Osei") but full names never do - which suits a
@@ -243,3 +266,21 @@ with open(PROBE_OUT / "probe.jsonl", "w") as f:
             probe_taken.add(order_id)
             f.write(json.dumps(record) + "\n")
 print(f"probe  {len(probe_taken):3d} rows -> {PROBE_OUT / 'probe.jsonl'}")
+
+
+# Same containment as the probe: its own directory, its own constants and rng, written
+# last so nothing above can be perturbed.
+DIAG_OUT.mkdir(parents=True, exist_ok=True)
+diag_names = [f"{f} {l}" for f in FIRST for l in DIAG_LAST]
+random.Random(SEED).shuffle(diag_names)
+diag_n, diag_ids, diag_start, diag_span, diag_seed = DIAG_SPEC
+diag_rng = random.Random(diag_seed)
+assert diag_n % len(CARRIERS) == 0, f"diag: {diag_n} is not a multiple of {len(CARRIERS)}"
+diag_schedule = CARRIERS * (diag_n // len(CARRIERS))
+diag_rng.shuffle(diag_schedule)
+with open(DIAG_OUT / "diag.jsonl", "w") as f:
+    for k, order_id in enumerate(diag_rng.sample(range(*diag_ids), diag_n)):
+        record = make_record(diag_rng, "T8", DIAG_TEMPLATE, order_id,
+                             diag_names, diag_start, diag_span, diag_schedule[k])
+        f.write(json.dumps(record) + "\n")
+print(f"diag   {diag_n:3d} rows -> {DIAG_OUT / 'diag.jsonl'}")

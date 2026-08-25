@@ -64,7 +64,7 @@ def classify(raw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--adapter", required=True, help="path to a saved epochN.pt")
-    ap.add_argument("--split", default="val", choices=["train", "val", "test", "probe"])
+    ap.add_argument("--split", default="val", choices=["train", "val", "test", "probe", "diag"])
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--limit", type=int)
     ap.add_argument("--tag", help="output filename tag; defaults to the adapter's stem. "
