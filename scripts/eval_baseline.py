@@ -23,6 +23,23 @@ DTYPE = torch.bfloat16
 MAX_NEW_TOKENS = 96          # a correct answer is ~43 tokens; this leaves fair headroom
 
 
+def pick_device():
+    """CUDA if present, else Apple MPS, else CPU.
+
+    Lets the identical code run on a CUDA worker and on the Mac without edits.
+    Note DTYPE stays bfloat16 everywhere; on CPU that runs but is slow, so CPU is a
+    last-resort fallback rather than a supported path.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = pick_device()
+
+
 def load(split):
     """Read one JSONL split into a list of dicts (sentence / target / template_id)."""
     return [json.loads(line) for line in open(DATA / f"{split}.jsonl")]
@@ -79,7 +96,7 @@ def load_model():
     """
     tokenizer = AutoTokenizer.from_pretrained(MODEL)
     tokenizer.padding_side = "left"
-    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=DTYPE).to("mps")
+    model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=DTYPE).to(DEVICE)
     model.eval()                 # disable train-time behaviour such as dropout
     return tokenizer, model
 
@@ -99,7 +116,7 @@ def generate(tokenizer, model, prompts, batch_size=1, progress=False):
     """
     outputs = []
     for i in range(0, len(prompts), batch_size):
-        inputs = tokenizer(prompts[i : i + batch_size], return_tensors="pt", padding=True).to("mps")
+        inputs = tokenizer(prompts[i : i + batch_size], return_tensors="pt", padding=True).to(DEVICE)
         with torch.no_grad():                      # no gradients needed -> less memory
             out = model.generate(
                 **inputs,
@@ -160,7 +177,7 @@ def main():
     # Validity and accuracy are reported separately on purpose: a fine-tune can fix the
     # output FORMAT without improving the CONTENT, and one number would hide that.
     n = len(records)
-    print(f"\r\n{MODEL} | {args.shots}-shot | {n} examples | greedy | {DTYPE} | mps | batch {args.batch_size}")
+    print(f"\r\n{MODEL} | {args.shots}-shot | {n} examples | greedy | {DTYPE} | {DEVICE} | batch {args.batch_size}")
     print(f"  JSON validity        {sum(r['valid'] for r in records) / n:6.1%}")
     print(f"  Exact record         {sum(r['exact'] for r in records) / n:6.1%}")
     print("  Per-field accuracy")

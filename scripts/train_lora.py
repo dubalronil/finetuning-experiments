@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 # Reuse the evaluation code so training and eval can never drift apart:
 # the same build_prompt() makes both the training text and the eval prompt.
-from eval_baseline import FIELDS, build_prompt, load, load_model, parse, generate
+from eval_baseline import DEVICE, FIELDS, build_prompt, load, load_model, parse, generate
 
 # --- Hyperparameters (see DESIGN.md) ---------------------------------------
 RANK, ALPHA, DROPOUT = 8, 16, 0.0   # rank 8 -> 1.15M trainable params (0.19% of model)
@@ -147,24 +147,20 @@ def collate(batch, pad_id):
 def loss_on(model, input_ids, labels, attention_mask):
     """Standard causal-LM cross-entropy.
 
-    The model outputs logits of shape (batch, seq_len, vocab). Position i's logits
-    predict token i+1, so we compare logits[:, :-1] against labels[:, 1:] - that
-    one-position offset is the "shift". (HF does this internally if you pass labels=;
-    it's written out here so the mechanic is visible.)
+    Position i predicts token i+1, so hidden[:, :-1] is compared against
+    labels[:, 1:] - that one-position offset is the "shift". (HF does this internally
+    if you pass labels=; it's written out here so the mechanic is visible.)
 
-    ignore_index=-100 means masked prompt positions drop out entirely - they affect
-    neither the averaged loss nor the gradients.
-
-    NOTE: this materialises a (batch, seq, 151936) logits tensor - ~187MB at batch 8,
-    and .float() doubles it. On an 8GB machine that causes paging. See the profiling
-    notes; computing lm_head only on loss-bearing positions fixes it.
+    Only positions whose label is not -100 contribute anything, so those are selected
+    FIRST and just they go through lm_head. The vocabulary projection is 151,936 wide,
+    so running it at every position would build a ~187MB logits tensor (doubled again
+    by .float()) and then throw over half of it away. Gathering first is mathematically
+    identical - verified to agree with the naive version to ~3e-8 - but much cheaper.
     """
-    logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
-    return F.cross_entropy(
-        logits[:, :-1, :].reshape(-1, logits.size(-1)).float(),
-        labels[:, 1:].reshape(-1),
-        ignore_index=-100,                                # masked positions contribute nothing
-    )
+    hidden = model.model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
+    h, tgt = hidden[:, :-1, :], labels[:, 1:]
+    keep = tgt != -100                                # positions that carry loss
+    return F.cross_entropy(model.lm_head(h[keep]).float(), tgt[keep])
 
 
 @torch.no_grad()
@@ -216,7 +212,7 @@ def main():
     ap.add_argument("--skip-eval", action="store_true", help="skip generation-based accuracy")
     args = ap.parse_args()
 
-    device = "mps"
+    device = DEVICE
     tokenizer, model = load_model()
     model.config.use_cache = False    # the KV cache is for generation; unused in training
     attach_lora(model)

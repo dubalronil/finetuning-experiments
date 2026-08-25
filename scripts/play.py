@@ -4,12 +4,14 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL = "Qwen/Qwen3-0.6B-Base"
+DEVICE = ("cuda" if torch.cuda.is_available()
+          else "mps" if torch.backends.mps.is_available() else "cpu")
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
-model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16).to("mps")
+model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16).to(DEVICE)
 model.eval()
 
-print(f"{MODEL} loaded on mps. Blank line or Ctrl-C to quit.\n")
+print(f"{MODEL} loaded on {DEVICE}. Blank line or Ctrl-C to quit.\n")
 
 while True:
     prompt = input("prompt> ")
@@ -19,7 +21,7 @@ while True:
     prompt = prompt.replace("\\n", "\n")
 
     # Text -> token ids. Note: no chat template, no special tokens. Raw continuation.
-    inputs = tokenizer(prompt, return_tensors="pt").to("mps")
+    inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     # print(f"[{inputs.input_ids.shape[1]} tokens: {tokenizer.convert_ids_to_tokens(inputs.input_ids[0])}]")
 
     with torch.no_grad():
