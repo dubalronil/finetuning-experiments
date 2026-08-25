@@ -20,14 +20,15 @@ import torch.nn.functional as F
 
 # Reuse the evaluation code so training and eval can never drift apart:
 # the same build_prompt() makes both the training text and the eval prompt.
-from eval_baseline import DEVICE, FIELDS, build_prompt, load, load_model, parse, generate
+from eval_baseline import (DEVICE, FIELDS, add_exp_arg, build_prompt, generate, load,
+                           load_model, parse, use_experiment)
 
 # --- Hyperparameters (see DESIGN.md) ---------------------------------------
 RANK, ALPHA, DROPOUT = 8, 16, 0.0   # rank 8 -> 1.15M trainable params (0.19% of model)
 LR, BATCH_SIZE, EPOCHS = 2e-4, 8, 3 # LoRA tolerates a much higher LR than full fine-tuning
 WARMUP_STEPS = 10                   # ramp LR from 0 to avoid a destructive first step
 TARGETS = ("q_proj", "v_proj")      # the original LoRA paper's minimal choice
-CKPT_DIR = Path("checkpoints/exp001_lora")
+CKPT_ROOT = Path("checkpoints")   # actual dir is CKPT_ROOT/<exp>_lora, chosen in main()
 
 
 class LoRALinear(nn.Module):
@@ -210,8 +211,13 @@ def main():
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--max-steps", type=int, help="stop early; for sanity checks")
     ap.add_argument("--skip-eval", action="store_true", help="skip generation-based accuracy")
+    add_exp_arg(ap)
     args = ap.parse_args()
 
+    use_experiment(args.exp)
+    # Checkpoints are namespaced by experiment, so a later run cannot overwrite an
+    # earlier experiment's adapters.
+    ckpt_dir = CKPT_ROOT / f"{args.exp}_lora"
     device = DEVICE
     tokenizer, model = load_model()
     model.config.use_cache = False    # the KV cache is for generation; unused in training
@@ -279,9 +285,9 @@ def main():
 
         # Save ONLY the adapter (~4.5MB), not the 600M-parameter base model. The base
         # weights never changed, so the adapter plus the model id is the full record.
-        CKPT_DIR.mkdir(parents=True, exist_ok=True)
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
         adapter = {n: p.detach().cpu() for n, p in model.named_parameters() if p.requires_grad}
-        torch.save(adapter, CKPT_DIR / f"epoch{epoch}.pt")
+        torch.save(adapter, ckpt_dir / f"epoch{epoch}.pt")
 
 
 if __name__ == "__main__":

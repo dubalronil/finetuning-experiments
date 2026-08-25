@@ -12,7 +12,8 @@ from pathlib import Path
 
 import torch
 
-from eval_baseline import DEVICE, FIELDS, build_prompt, generate, load, load_model, parse
+from eval_baseline import (DEVICE, FIELDS, add_exp_arg, build_prompt, generate, load,
+                           load_model, parse, use_experiment)
 from train_lora import attach_lora
 
 
@@ -66,8 +67,10 @@ def main():
     ap.add_argument("--split", default="val", choices=["train", "val", "test"])
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--limit", type=int)
+    add_exp_arg(ap)
     args = ap.parse_args()
 
+    use_experiment(args.exp)
     rows = load(args.split)[: args.limit]
     tokenizer, model = load_model()
     load_adapter(model, args.adapter)
@@ -93,7 +96,7 @@ def main():
         })
 
     tag = Path(args.adapter).stem
-    out_path = Path("results") / f"exp001_lora_{tag}_{args.split}_0shot.jsonl"
+    out_path = Path("results") / f"{args.exp}_lora_{tag}_{args.split}_0shot.jsonl"
     out_path.parent.mkdir(exist_ok=True)
     with open(out_path, "w") as f:
         for r in records:

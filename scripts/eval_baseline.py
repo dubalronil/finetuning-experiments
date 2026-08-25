@@ -18,7 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL = "Qwen/Qwen3-0.6B-Base"
 FIELDS = ["order_id", "customer", "ship_date", "carrier"]
-DATA = Path("data/exp001")
+DATA = Path("data/exp001")   # rebound by use_experiment(); see add_exp_arg()
 DTYPE = torch.bfloat16
 MAX_NEW_TOKENS = 96          # a correct answer is ~43 tokens; this leaves fair headroom
 
@@ -38,6 +38,23 @@ def pick_device():
 
 
 DEVICE = pick_device()
+
+
+def add_exp_arg(ap):
+    """Register --exp. Defined here so all three scripts spell the flag identically."""
+    ap.add_argument("--exp", default="exp001",
+                    help="experiment name: reads data/<exp>/ and names outputs after it")
+
+
+def use_experiment(exp):
+    """Point load() at data/<exp>/. Call once from main() BEFORE any split is read.
+
+    Rebinding the module global rather than threading a path through every function
+    keeps train_lora and eval_adapter on the same data as the baseline evaluator by
+    construction - there is only one place a split can come from.
+    """
+    global DATA
+    DATA = Path("data") / exp
 
 
 def load(split):
@@ -140,8 +157,10 @@ def main():
     ap.add_argument("--shots", type=int, default=4, choices=[0, 1, 2, 4])
     ap.add_argument("--limit", type=int, help="evaluate only the first N test examples")
     ap.add_argument("--batch-size", type=int, default=1, help="speed only; results are unchanged")
+    add_exp_arg(ap)
     args = ap.parse_args()
 
+    use_experiment(args.exp)
     test = load("test")[: args.limit]
     # Exemplars are the first N rows of the TRAIN split - fixed for every test item, so
     # no item gets luckier examples than another, and never drawn from test.
@@ -168,7 +187,7 @@ def main():
             "exact": all(fields.values()),      # correct only if ALL four fields match
         })
 
-    out_path = Path("results") / f"exp001_base_{args.shots}shot.jsonl"
+    out_path = Path("results") / f"{args.exp}_base_{args.shots}shot.jsonl"
     out_path.parent.mkdir(exist_ok=True)
     with open(out_path, "w") as f:
         for r in records:
