@@ -64,9 +64,12 @@ def classify(raw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--adapter", required=True, help="path to a saved epochN.pt")
-    ap.add_argument("--split", default="val", choices=["train", "val", "test"])
+    ap.add_argument("--split", default="val", choices=["train", "val", "test", "probe"])
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--tag", help="output filename tag; defaults to the adapter's stem. "
+                                  "Adapters from different experiments share stems "
+                                  "(epoch2.pt), so pass this when probing more than one.")
     add_exp_arg(ap)
     args = ap.parse_args()
 
@@ -95,7 +98,7 @@ def main():
             "failure": None if all(fields.values()) else classify(raw),
         })
 
-    tag = Path(args.adapter).stem
+    tag = args.tag or Path(args.adapter).stem
     out_path = Path("results") / f"{args.exp}_lora_{tag}_{args.split}_0shot.jsonl"
     out_path.parent.mkdir(exist_ok=True)
     with open(out_path, "w") as f:
@@ -109,6 +112,20 @@ def main():
     print("  Per-field accuracy")
     for k in FIELDS:
         print(f"    {k:<12s}       {sum(r['fields'][k] for r in records) / n:6.1%}")
+
+    # The failure mode T12/T13 were added to fix: the two "to"-marked values traded.
+    # Counted over every record, not just failures, so it stays comparable across runs.
+    swaps = [r for r in records if r["parsed"]
+             and str(r["parsed"].get("customer", "")).strip() == r["target"]["carrier"]
+             and str(r["parsed"].get("carrier", "")).strip() == r["target"]["customer"]]
+    print(f"  customer/carrier swap  {len(swaps) / n:6.1%}  ({len(swaps)}/{n})")
+
+    print("\n  by template")
+    for tid in sorted({r["template_id"] for r in records}):
+        rows = [r for r in records if r["template_id"] == tid]
+        sw = sum(1 for r in rows if r in swaps)
+        ex = sum(r["exact"] for r in rows)
+        print(f"    {tid:<4s} exact {ex:3d}/{len(rows):<3d} {ex / len(rows):6.1%}   swaps {sw}")
 
     fails = [r for r in records if not r["exact"]]
     print(f"\n  failures: {len(fails)}/{n}")

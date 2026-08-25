@@ -6,7 +6,7 @@ emitted from the same base draw, so every experiment's val/test are byte-identic
 each train.jsonl is the previous one with rows appended - nothing rewritten.
 
 Builds 600 records for exp001, 640 for exp002 and 680 for exp003 by filling sentence
-templates with made-up values.
+templates with made-up values, plus a 100-row held-out role probe (see PROBE below).
 The point of synthetic data is that ground truth is CONSTRUCTED rather than
 labelled, so it is correct by definition - there is no annotation noise to argue
 with when a model gets something wrong.
@@ -117,6 +117,40 @@ EXPERIMENTS = {
     },
 }
 
+# --- Held-out role probe -----------------------------------------------------------
+# NOT an experiment and NOT a split: this exists only to ask whether a trained adapter
+# learned that "to X" is decided by what X IS - a member of the five-item carrier
+# vocabulary, or an open-vocabulary person name - rather than by position or by a
+# memorised frame. P1 and P2 carry the two "to" phrases in OPPOSITE orders, so a model
+# using a positional shortcut ("first to = carrier") scores well on one and badly on the
+# other. Both are syntactically unlike the three two-"to" frames the model may have seen:
+# T8/T12/T13 all put both phrases in ONE clause joined by a coordinator, whereas P1 uses
+# a fronted participial phrase and P2 two independent clauses with a pronoun subject. No
+# verb here appears anywhere else in the corpus.
+#
+# It lives in its own directory containing ONLY probe.jsonl - no train.jsonl, no
+# val.jsonl - so train_lora.py --exp probe_role dies on a missing file rather than
+# quietly training on it. That is a structural guarantee, not a naming convention.
+PROBE_OUT = Path("data/probe_role")
+PROBE_TEMPLATES = {
+    # carrier's "to" first
+    "P1": "Consigned to {carrier} on {ship_date}, order #{order_id} is on its way to {customer}.",
+    # customer's "to" first
+    "P2": "Order #{order_id} is going to {customer}; it was entrusted to {carrier} on {ship_date}.",
+}
+# The 120-name pool below is fully consumed by the three split slices - only two full
+# names are left over, nowhere near 100 rows. Extending FIRST or LAST is not an option
+# either: `names` is shuffled with the global SEED, so one extra entry would reshuffle it
+# and change the customer on every row of every existing file. The probe therefore gets
+# its OWN surnames, reusing FIRST so the first names stay familiar and tokenisation
+# remains comparable. These never enter `names`.
+PROBE_LAST = ["Adeyemi", "Bergstrom", "Costa", "Delacroix", "Eriksen",
+              "Fontaine", "Gagnon", "Halvorsen", "Ibarra", "Jensen"]
+# n, order-id range, first date, span in days, seed - all disjoint from every split
+# (ids stop at 9999, dates stop at 2025-12-31).
+PROBE_SPEC = {"P1": (50, (10000, 12000), date(2026, 1, 1), 180, 9101),
+              "P2": (50, (12000, 14000), date(2026, 1, 1), 180, 9102)}
+
 # 12 first names x 10 last names = 120 unique full names, shuffled once with a fixed
 # seed and then sliced into disjoint pools. Name COMPONENTS recur across splits (train
 # may hold "Priya Raman", test "Priya Osei") but full names never do - which suits a
@@ -188,3 +222,24 @@ for exp, extra_groups in EXPERIMENTS.items():
 
         suffix = f" (+{extra_n} add-on)" if extra_n else ""
         print(f"{exp} {split:5s} {n + extra_n:3d} rows -> {out / f'{split}.jsonl'}{suffix}")
+
+
+# The probe is written last and from its own constants and rngs, so nothing above can be
+# perturbed by anything here.
+PROBE_OUT.mkdir(parents=True, exist_ok=True)
+probe_names = [f"{f} {l}" for f in FIRST for l in PROBE_LAST]
+random.Random(SEED).shuffle(probe_names)
+probe_taken = set()
+with open(PROBE_OUT / "probe.jsonl", "w") as f:
+    for tid, (n, id_range, start, span, seed) in PROBE_SPEC.items():
+        rng = random.Random(seed)
+        assert n % len(CARRIERS) == 0, f"{tid}: {n} is not a multiple of {len(CARRIERS)}"
+        schedule = CARRIERS * (n // len(CARRIERS))
+        rng.shuffle(schedule)
+        for k, order_id in enumerate(rng.sample(range(*id_range), n)):
+            record = make_record(rng, tid, PROBE_TEMPLATES[tid], order_id,
+                                 probe_names, start, span, schedule[k])
+            assert order_id not in probe_taken
+            probe_taken.add(order_id)
+            f.write(json.dumps(record) + "\n")
+print(f"probe  {len(probe_taken):3d} rows -> {PROBE_OUT / 'probe.jsonl'}")
