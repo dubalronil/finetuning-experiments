@@ -1,0 +1,97 @@
+# Experiments
+
+## Experiment 001 — Initial LoRA baseline
+
+### Question
+
+Can LoRA teach Qwen3-0.6B-Base to perform the shipment extraction task zero-shot?
+
+### Training data
+
+- 240 examples
+- Templates T1–T6
+- 40 examples per template
+
+### Configuration
+
+- Model: Qwen/Qwen3-0.6B-Base
+- LoRA targets: q_proj, v_proj
+- Rank: 8
+- Alpha: 16
+- Dropout: 0.0
+- Learning rate: 2e-4
+- Batch size: 8
+- Epochs: 3
+
+### Results
+
+| Epoch | Train Loss | Val Loss | JSON Valid | Exact |
+| ----- | ---------: | -------: | ---------: | ----: |
+| 1     |     0.1130 |   0.0713 |      38.3% | 38.3% |
+| 2     |     0.0004 |   0.0677 |      40.0% | 40.0% |
+| 3     |     0.0002 |   0.0687 |      40.0% | 40.0% |
+
+### Diagnosis
+
+- T7: 0/30 correct
+- T8: 24/30 correct
+- All 30 T7 missing-field failures omitted `carrier`.
+- T7 was the only validation pattern with a bare sentence-initial carrier.
+
+### Takeaway
+
+The model learned the training patterns but did not generalize reliably to a carrier appearing at the beginning of the sentence.
+
+## Experiment 002 — Add carrier-first training examples
+
+### Question
+
+Does adding training examples with a bare sentence-initial carrier improve generalization to T7?
+
+### Change from Experiment 001
+
+Added 40 T11 examples:
+
+`{carrier} collected order #{order_id} on {ship_date} for {customer}.`
+
+The original 240 Experiment 001 training examples remain byte-for-byte unchanged.
+
+### Training data
+
+- 280 examples
+- T1–T6: 40 each
+- T11: 40
+- Validation and test sets unchanged
+
+### Configuration
+
+Same as Experiment 001.
+
+### Results
+
+| Epoch | Train Loss | Val Loss | JSON Valid | Exact |
+| ----- | ---------: | -------: | ---------: | ----: |
+| 1     |     0.0991 |   0.0083 |      93.3% | 93.3% |
+| 2     |     0.0004 |   0.0081 |      98.3% | 93.3% |
+| 3     |     0.0002 |   0.0072 |      98.3% | 93.3% |
+
+### Diagnosis
+
+- T7: 30/30 correct
+- T8: 26/30 correct
+- All 4 remaining failures were on T8.
+- 3 failures had wrong field values.
+- 1 failure used the wrong schema.
+- The original T7 failure mode — omitting `carrier` — disappeared completely.
+
+### Takeaway
+
+Adding one new training pattern increased validation exact accuracy from 40.0% to 93.3%.
+
+T7 improved from 0/30 to 30/30, strongly supporting the hypothesis that the original failure was largely driven by insufficient training-data diversity rather than insufficient LoRA capacity.
+
+The remaining errors are now a different failure mode: on some T8 examples, the model confuses the customer and carrier fields.
+
+### Next
+
+Investigate the remaining T8 failures before changing model capacity or hyperparameters.
