@@ -15,16 +15,18 @@ while True:
     prompt = input("prompt> ")
     if not prompt.strip():
         break
+    # Let a typed \n become a real newline, so multi-line prompts can be entered.
+    prompt = prompt.replace("\\n", "\n")
 
     # Text -> token ids. Note: no chat template, no special tokens. Raw continuation.
     inputs = tokenizer(prompt, return_tensors="pt").to("mps")
-    print(f"[{inputs.input_ids.shape[1]} tokens: {tokenizer.convert_ids_to_tokens(inputs.input_ids[0])}]")
+    # print(f"[{inputs.input_ids.shape[1]} tokens: {tokenizer.convert_ids_to_tokens(inputs.input_ids[0])}]")
 
     with torch.no_grad():
         output = model.generate(
             **inputs,
             max_new_tokens=128,
-            do_sample=True,      # set False for greedy decoding
+            do_sample=False,      # set False for greedy decoding
             temperature=0.8,
             top_p=0.9,
         )
