@@ -1,12 +1,12 @@
-"""Generate the Experiment 001 and 002 datasets. Same seed -> byte-identical files.
+"""Generate the Experiment 001, 002 and 003 datasets. Same seed -> byte-identical files.
 
 Each experiment gets its own directory under data/. exp001 is the frozen baseline;
-exp002 is exp001 plus one extra training template. Both are emitted from the same base
-draw, so exp002's val/test are byte-identical to exp001's and exp002's train.jsonl is
-exp001's train.jsonl with 40 rows appended - nothing rewritten.
+each later experiment is the previous one plus extra training templates. All of them are
+emitted from the same base draw, so every experiment's val/test are byte-identical and
+each train.jsonl is the previous one with rows appended - nothing rewritten.
 
-Builds 600 records for exp001 and 640 for exp002 by filling sentence templates
-with made-up values.
+Builds 600 records for exp001, 640 for exp002 and 680 for exp003 by filling sentence
+templates with made-up values.
 The point of synthetic data is that ground truth is CONSTRUCTED rather than
 labelled, so it is correct by definition - there is no annotation noise to argue
 with when a model gets something wrong.
@@ -84,14 +84,35 @@ SPLITS = {
 # reads as generalisation rather than memorisation. Note that T11 also breaks the
 # ship_date/carrier adjacency that every exp001 template and val's T8 preserve, so position
 # and adjacency are varied together, not independently.
-# experiment -> split -> [(template id, template, how many, seed)]
+#
+# T12/T13 target a different gap. Across all 280 exp002 training rows the word "to" is
+# followed by the customer 40 times out of 40 and by a carrier never, so "to X" is an
+# unambiguous customer-marker - which is exactly what val's T8 violates, and why its
+# failures swap the two values. The pair introduces "to" before a CARRIER, in both
+# orderings (T12 carrier-first, T13 customer-first) and in equal numbers, so that "first
+# to = carrier" is not learnable as a positional shortcut. Passing both requires deciding
+# role from what the noun IS - a member of the five-item carrier vocabulary, or an
+# open-vocabulary person name - rather than from the preposition.
+#
+# balanced=True draws carriers from a shuffled fixed schedule (count/5 of each) instead of
+# rng.choice, so a per-carrier readout is not confounded by an uneven draw. It is set on
+# T12/T13 only; leaving it False everywhere else keeps the earlier rows byte-identical.
+# experiment -> split -> [(template id, template, how many, seed, balanced)]
 EXPERIMENTS = {
     # Frozen baseline: the six training templates, no add-ons.
     "exp001": {},
-    # Training-data-diversity experiment: exp001 plus 40 T11 rows, and nothing else.
+    # Training-data diversity: exp001 plus 40 T11 rows, and nothing else.
     "exp002": {
         "train": [
-            ("T11", "{carrier} collected order #{order_id} on {ship_date} for {customer}.", 40, 9002),
+            ("T11", "{carrier} collected order #{order_id} on {ship_date} for {customer}.", 40, 9002, False),
+        ],
+    },
+    # Role disambiguation: exp002 plus 20 T12 + 20 T13 rows, and nothing else.
+    "exp003": {
+        "train": [
+            ("T11", "{carrier} collected order #{order_id} on {ship_date} for {customer}.", 40, 9002, False),
+            ("T12", "Order #{order_id} passed to {carrier} and then to {customer} on {ship_date}.", 20, 9003, True),
+            ("T13", "On {ship_date}, order #{order_id} was addressed to {customer} and released to {carrier}.", 20, 9004, True),
         ],
     },
 }
@@ -104,15 +125,19 @@ names = [f"{f} {l}" for f in FIRST for l in LAST]
 random.Random(SEED).shuffle(names)
 
 
-def make_record(rng, tid, template, order_id, pool, start, span):
+def make_record(rng, tid, template, order_id, pool, start, span, carrier=None):
     """Build one record. The answer is constructed FIRST, then the sentence is rendered
     from it - because the placeholders match the field names, format(**target) fills the
-    sentence straight from the answer and the two cannot disagree."""
+    sentence straight from the answer and the two cannot disagree.
+
+    Passing `carrier` supplies it from a balanced schedule instead of drawing it. That
+    also SKIPS the rng.choice(CARRIERS) call, so a balanced group consumes a different
+    number of rng values - which is fine, because balanced groups have their own rng."""
     target = {
         "order_id": str(order_id),
         "customer": rng.choice(pool),
         "ship_date": str(start + timedelta(days=rng.randrange(span))),
-        "carrier": rng.choice(CARRIERS),
+        "carrier": rng.choice(CARRIERS) if carrier is None else carrier,
     }
     return {"sentence": template.format(**target), "target": target, "template_id": tid}
 
@@ -144,11 +169,19 @@ for exp, extra_groups in EXPERIMENTS.items():
             # above are untouched by anything that happens here.
             taken = set(order_ids)
             extra_n = 0
-            for tid, template, count, extra_seed in extra_groups.get(split, []):
+            for tid, template, count, extra_seed, balanced in extra_groups.get(split, []):
                 extra_rng = random.Random(extra_seed)
                 unused = [oid for oid in range(*id_range) if oid not in taken]
-                for order_id in extra_rng.sample(unused, count):
-                    record = make_record(extra_rng, tid, template, order_id, pool, start, span)
+                # An exactly-equal number of each carrier, shuffled so carrier is not
+                # correlated with order id. count must divide evenly by len(CARRIERS).
+                schedule = None
+                if balanced:
+                    assert count % len(CARRIERS) == 0, f"{tid}: {count} is not a multiple of {len(CARRIERS)}"
+                    schedule = CARRIERS * (count // len(CARRIERS))
+                    extra_rng.shuffle(schedule)
+                for k, order_id in enumerate(extra_rng.sample(unused, count)):
+                    carrier = schedule[k] if schedule else None
+                    record = make_record(extra_rng, tid, template, order_id, pool, start, span, carrier)
                     taken.add(order_id)
                     extra_n += 1
                     f.write(json.dumps(record) + "\n")
