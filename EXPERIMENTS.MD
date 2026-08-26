@@ -116,6 +116,19 @@ Added 40 examples:
 
 The original 280 Experiment 002 rows remain byte-for-byte unchanged.
 
+### Training data
+
+- 320 examples
+- T1–T6: 40 each
+- T11: 40
+- T12: 20
+- T13: 20
+- Validation and test sets unchanged
+
+### Configuration
+
+Same as Experiment 001.
+
 ### Results
 
 | Epoch | Train Loss | Val Loss | JSON Valid |  Exact |
@@ -132,12 +145,106 @@ The original 280 Experiment 002 rows remain byte-for-byte unchanged.
 - All four Experiment 002 T8 failures disappeared.
 - The previous customer/carrier swap failure mode was no longer observed on validation.
 
+### Role Generalization Probe
+
+Before relying on the saturated validation set, Experiment 002 was evaluated on a separate 100-example probe with two novel sentence structures containing both customer and carrier roles.
+
+| Adapter        |            Exact |    P1 |    P2 | Customer/Carrier Swaps |
+| -------------- | ---------------: | ----: | ----: | ---------------------: |
+| Exp002 epoch 2 | 100/100 (100.0%) | 50/50 | 50/50 |                      0 |
+
+Experiment 002 generalized perfectly to both unseen probe structures.
+
+This result ruled out the broader hypothesis that Experiment 002 had simply learned a universal `to → customer` shortcut. Its remaining weakness was narrower and appeared to be specific to the T8 structure or wording.
+
+### T8 Diagnostic
+
+A separate 150-example T8 diagnostic set was used to check whether the original T8 weakness was repeatable.
+
+| Adapter        |           Exact | Customer/Carrier Swaps |
+| -------------- | --------------: | ---------------------: |
+| Exp002 epoch 2 | 138/150 (92.0%) |                      8 |
+| Exp003 epoch 2 | 149/150 (99.3%) |                      0 |
+
+On the same 150 examples, Experiment 003 fixed 11 Experiment 002 failures, introduced 0 new failures, and left 1 example wrong in both models.
+
+The customer/carrier swap failure mode disappeared completely.
+
 ### Takeaway
 
-Validation exact accuracy increased from 93.3% to 100.0%. The four remaining T8 failures from Experiment 002 disappeared after adding examples that prevented the model from relying on a fixed `to`-position shortcut.
+Experiment 003 substantially improved performance on the specific T8 structure: exact accuracy increased from 92.0% to 99.3% on a larger diagnostic set, while customer/carrier swaps fell from 8 to 0.
 
-This shows that targeted training-data diversity can correct specific learned shortcuts without increasing LoRA capacity.
+This supports the conclusion that the targeted T12/T13 training examples corrected a real, repeatable T8-specific weakness. It does not by itself prove broader role generalization, since Experiment 002 already scored 100/100 on the separate novel-frame role probe.
 
-### Next
+### Test Evaluation
 
-Evaluate on new held-out sentence structures to determine whether the customer/carrier role distinction generalized beyond T12/T13 and the existing validation templates.
+The selected Experiment 003 epoch-2 adapter was evaluated zero-shot on the fixed 300-example test set.
+
+| Metric                 |           Result |
+| ---------------------- | ---------------: |
+| JSON validity          |           100.0% |
+| Exact record accuracy  | 300/300 (100.0%) |
+| Order ID accuracy      |           100.0% |
+| Customer accuracy      |           100.0% |
+| Ship date accuracy     |           100.0% |
+| Carrier accuracy       |           100.0% |
+| Customer/carrier swaps |                0 |
+
+By template:
+
+- T9: 150/150
+- T10: 150/150
+
+No test failures were observed.
+
+### Final Takeaway
+
+Across three controlled experiments, the main gains observed came from improving training-data coverage while LoRA capacity and hyperparameters were kept fixed.
+
+Experiment 001 exposed a carrier-position generalization failure. Experiment 002 fixed that failure by adding a targeted carrier-first pattern, but revealed a narrower T8 role-confusion weakness. Experiment 003 added examples that varied customer/carrier role ordering and reduced T8 diagnostic errors from 12/150 to 1/150 while eliminating all customer/carrier swaps.
+
+The selected Experiment 003 adapter then achieved 300/300 exact accuracy on the fixed zero-shot test set.
+
+## Reproducibility
+
+Dataset generation is fully deterministic: `scripts/make_dataset.py` regenerates every
+file under `data/` byte-for-byte from fixed seeds, and each experiment's training set is
+the previous one with rows appended rather than resampled. Evaluation is deterministic
+too — greedy decoding, `do_sample=False`, and outputs verified identical across batch
+sizes.
+
+Training was not fully seeded when Experiments 001–003 were run. LoRA's `A` matrices are
+drawn from the global PyTorch RNG, which was left unseeded, so those three runs cannot be
+reproduced exactly. `scripts/train_lora.py` now sets `torch.manual_seed(TRAIN_SEED)` with
+`TRAIN_SEED = 0` before the adapters are attached, making future runs reproducible.
+
+The results recorded above are preserved exactly as measured, before that seed was added.
+Re-running Experiments 001–003 with the current code will produce a different adapter
+initialisation and therefore slightly different loss values. The conclusions do not depend
+on those exact numbers — each rests on a large accuracy gap (40.0% → 93.3% → 100.0% on
+validation, and 92.0% → 99.3% on the 150-example T8 diagnostic) rather than on a small
+difference that initialisation noise could explain.
+
+### Base model few-shot baseline
+
+An earlier version of `scripts/eval_baseline.py` ignored the `--shots` value and always
+used four exemplars, so the runs originally labelled 1-shot and 2-shot were in fact 4-shot
+runs. The bug is fixed and the affected results were re-measured on the same 300-example
+test set:
+
+| Prompt  | JSON validity |            Exact | T9      | T10     |
+| ------- | ------------: | ---------------: | ------- | ------- |
+| 0-shot  |          0.0% |     0/300 (0.0%) | 0/150   | 0/150   |
+| 1-shot  |         50.0% | 150/300 (50.0%)  | 150/150 | 0/150   |
+| 2-shot  |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
+| 4-shot  |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
+
+The 1-shot split is clean rather than random: with a single T1 exemplar the model handles
+T9 perfectly but fails every T10, where the sentence opens with "Tracking for …" and the
+model emits a `tracking_number` key instead of the required schema. One example is not
+enough to pin the output format against lexical priming from the input; two are.
+
+This does not change any experiment's conclusion — every fine-tuned result is measured
+zero-shot — but it sharpens the motivation for fine-tuning: the base model needs at least
+two in-context examples to produce the schema reliably, which fine-tuning removes the need
+for entirely.
