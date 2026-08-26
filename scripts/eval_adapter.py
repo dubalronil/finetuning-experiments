@@ -14,7 +14,7 @@ import torch
 
 from eval_baseline import (DEVICE, FIELDS, add_exp_arg, build_prompt, generate, load,
                            load_model, parse, use_experiment)
-from train_lora import attach_lora
+from train_lora import ALPHA_RATIO, attach_lora
 
 
 def load_adapter(model, path):
@@ -23,9 +23,24 @@ def load_adapter(model, path):
     attach_lora() creates the adapters with B=0 (a no-op). load_state_dict fills in
     the trained values. strict=False is required because the checkpoint holds ONLY
     the adapter tensors - every base weight shows up as "missing", which is expected.
+
+    Two checkpoint layouts are accepted. Current ones nest the tensors under "adapter"
+    and record the rank and alpha they were trained with. Experiment 001-003 files are
+    a flat {name: tensor} dict with no metadata: there the rank is read off A's first
+    dimension, and alpha falls back to ALPHA_RATIO x rank - correct for every one of
+    them, since they were all trained at rank 8 / alpha 16. The fallback announces
+    itself rather than passing silently, because a wrong alpha would change predictions
+    without raising anything.
     """
-    attach_lora(model)
     state = torch.load(path, map_location=DEVICE)
+    if isinstance(state.get("adapter"), dict):
+        rank, alpha, state = state["rank"], state["alpha"], state["adapter"]
+    else:
+        rank = next(v.shape[0] for k, v in state.items() if k.endswith(".A"))
+        alpha = ALPHA_RATIO * rank
+        print(f"  legacy checkpoint (no metadata): rank {rank} from tensor shapes, "
+              f"assuming alpha = {ALPHA_RATIO} x rank = {alpha}")
+    attach_lora(model, rank, alpha)
     _, unexpected = model.load_state_dict(state, strict=False)
     assert not unexpected, f"checkpoint has keys the model doesn't: {unexpected[:3]}"
 
@@ -33,7 +48,7 @@ def load_adapter(model, path):
     # so if every B is still zero, nothing was actually loaded.
     bs = [p for n, p in model.named_parameters() if n.endswith(".B")]
     assert any(p.abs().sum().item() > 0 for p in bs), "all B matrices are zero - adapter not loaded"
-    print(f"  loaded {len(state)} adapter tensors from {path}")
+    print(f"  loaded {len(state)} adapter tensors (rank {rank}, alpha {alpha}) from {path}")
     return model
 
 

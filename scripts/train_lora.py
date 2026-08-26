@@ -25,6 +25,7 @@ from eval_baseline import (DEVICE, FIELDS, add_exp_arg, build_prompt, generate, 
 
 # --- Hyperparameters (see EXPERIMENTS.MD) ----------------------------------
 RANK, ALPHA, DROPOUT = 8, 16, 0.0   # rank 8 -> 1.15M trainable params (0.19% of model)
+ALPHA_RATIO = 2                     # --rank derives alpha from this; 8/16 keeps the default
 LR, BATCH_SIZE, EPOCHS = 2e-4, 8, 3 # LoRA tolerates a much higher LR than full fine-tuning
 WARMUP_STEPS = 10                   # ramp LR from 0 to avoid a destructive first step
 TARGETS = ("q_proj", "v_proj")      # the original LoRA paper's minimal choice
@@ -69,8 +70,13 @@ class LoRALinear(nn.Module):
         return out + delta.to(out.dtype)
 
 
-def attach_lora(model):
+def attach_lora(model, rank=RANK, alpha=ALPHA):
     """Freeze the whole model, then replace the target projections with LoRA versions.
+
+    rank/alpha default to the module constants, so every existing call site behaves
+    exactly as before. Evaluation passes the values recorded in a checkpoint instead -
+    alpha matters at load time because it sets the scale the adapter output is
+    multiplied by, and getting it wrong changes predictions without raising anything.
 
     Order matters: freeze FIRST, then attach. The LoRA parameters are created after
     the freeze, so they keep requires_grad=True and end up as the only trainable
@@ -88,7 +94,7 @@ def attach_lora(model):
     for layer in model.model.layers:
         for name in TARGETS:
             base = getattr(layer.self_attn, name)
-            setattr(layer.self_attn, name, LoRALinear(base, RANK, ALPHA, DROPOUT).to(base.weight.device))
+            setattr(layer.self_attn, name, LoRALinear(base, rank, alpha, DROPOUT).to(base.weight.device))
 
     trainable = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
     n_train = sum(p.numel() for _, p in trainable)
@@ -212,8 +218,19 @@ def main():
     ap.add_argument("--epochs", type=int, default=EPOCHS)
     ap.add_argument("--max-steps", type=int, help="stop early; for sanity checks")
     ap.add_argument("--skip-eval", action="store_true", help="skip generation-based accuracy")
+    ap.add_argument("--rank", type=int, default=RANK,
+                    help=f"LoRA rank; alpha is set to {ALPHA_RATIO} x rank (default {RANK})")
+    ap.add_argument("--ckpt-dir", help="where to write epochN.pt "
+                                       "(default checkpoints/<exp>_lora, unchanged)")
     add_exp_arg(ap)
     args = ap.parse_args()
+
+    # A non-default rank writes differently-shaped adapters, so it must not land in the
+    # default directory - that would overwrite the checkpoints an earlier experiment's
+    # published results came from. Fail here, before the model is even loaded.
+    if args.rank != RANK and not args.ckpt_dir:
+        ap.error(f"--rank {args.rank} needs --ckpt-dir too, or it would overwrite "
+                 f"{CKPT_ROOT / f'{args.exp}_lora'}/ (the default rank-{RANK} checkpoints)")
 
     use_experiment(args.exp)
     # Seed BEFORE attach_lora: LoRA's A matrices are drawn from the global torch RNG,
@@ -221,13 +238,17 @@ def main():
     # generator, and dropout is 0). Without this a rerun trains a different adapter.
     # Experiments 001-003 predate this line - see the note in EXPERIMENTS.MD.
     torch.manual_seed(TRAIN_SEED)
+    # alpha/rank is held constant so a rank sweep varies CAPACITY without also varying
+    # the magnitude of the adapter's contribution (scale = alpha/rank is 2 either way).
+    rank, alpha = args.rank, ALPHA_RATIO * args.rank
     # Checkpoints are namespaced by experiment, so a later run cannot overwrite an
-    # earlier experiment's adapters.
-    ckpt_dir = CKPT_ROOT / f"{args.exp}_lora"
+    # earlier experiment's adapters. --ckpt-dir overrides that for sweeps whose runs
+    # share one experiment's data but differ in a hyperparameter.
+    ckpt_dir = Path(args.ckpt_dir) if args.ckpt_dir else CKPT_ROOT / f"{args.exp}_lora"
     device = DEVICE
     tokenizer, model = load_model()
     model.config.use_cache = False    # the KV cache is for generation; unused in training
-    attach_lora(model)
+    attach_lora(model, rank, alpha)
 
     # Tokenise everything up front - 300 short examples, so this is instant and keeps
     # the training loop free of data-prep noise.
@@ -253,7 +274,7 @@ def main():
         else max(0.0, (total_steps - s) / max(1, total_steps - WARMUP_STEPS)),
     )
     print(f"  {len(train_data)} train / {len(val_rows)} val | {steps_per_epoch} steps/epoch "
-          f"| {total_steps} total steps | lr {LR}")
+          f"| {total_steps} total steps | lr {LR} | rank {rank} alpha {alpha} -> {ckpt_dir}")
 
     generator = torch.Generator().manual_seed(0)   # fixed seed -> same shuffle every run
     step = 0
@@ -289,11 +310,14 @@ def main():
             line += f"  val_json_valid {valid:.1%}  val_exact {exact:.1%}"
         print(line)
 
-        # Save ONLY the adapter (~4.5MB), not the 600M-parameter base model. The base
-        # weights never changed, so the adapter plus the model id is the full record.
+        # Save ONLY the adapter (~4.5MB at rank 8), not the 600M-parameter base model.
+        # The base weights never changed, so the adapter plus the model id is the full
+        # record. rank/alpha ride along because alpha cannot be recovered from the
+        # tensors: it is a scalar multiplier, not a saved parameter.
         ckpt_dir.mkdir(parents=True, exist_ok=True)
         adapter = {n: p.detach().cpu() for n, p in model.named_parameters() if p.requires_grad}
-        torch.save(adapter, ckpt_dir / f"epoch{epoch}.pt")
+        torch.save({"format": 1, "rank": rank, "alpha": alpha, "adapter": adapter},
+                   ckpt_dir / f"epoch{epoch}.pt")
 
 
 if __name__ == "__main__":
