@@ -1,4 +1,4 @@
-"""Baseline evaluator for Experiment 001.
+"""Baseline evaluator. Runs any experiment's split via --exp.
 
 Measures how well a model turns a shipment sentence into a fixed four-field JSON
 record. Supports two prompt regimes:
@@ -104,7 +104,7 @@ def parse(text):
 
 
 def load_model():
-    """Load tokenizer and model onto the GPU (MPS) in bfloat16.
+    """Load tokenizer and model onto the selected device in bfloat16.
 
     padding_side="left" is REQUIRED for batched generation. Sequences in a batch have
     different lengths, so short ones get padded. With right-padding a short prompt
@@ -164,7 +164,7 @@ def main():
     test = load("test")[: args.limit]
     # Exemplars are the first N rows of the TRAIN split - fixed for every test item, so
     # no item gets luckier examples than another, and never drawn from test.
-    shots = load("train")[:4] if args.shots else []
+    shots = load("train")[: args.shots]
 
     tokenizer, model = load_model()
     prompts = [build_prompt(row["sentence"], shots) for row in test]
