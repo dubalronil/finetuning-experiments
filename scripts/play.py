@@ -22,15 +22,12 @@ while True:
 
     # Text -> token ids. Note: no chat template, no special tokens. Raw continuation.
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
-    # print(f"[{inputs.input_ids.shape[1]} tokens: {tokenizer.convert_ids_to_tokens(inputs.input_ids[0])}]")
 
     with torch.no_grad():
         output = model.generate(
             **inputs,
             max_new_tokens=128,
-            do_sample=False,      # set False for greedy decoding
-            temperature=0.8,
-            top_p=0.9,
+            do_sample=False,      # greedy, to match the evaluators; True to sample
         )
 
     # Slice off the prompt so we only print what the model added.

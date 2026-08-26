@@ -1,4 +1,6 @@
-# Experiment 001 — base model baseline (Qwen3-0.6B-Base)
-# Apple Silicon / macOS: default PyPI wheels are arm64 with MPS support.
+# Qwen3-0.6B-Base fine-tuning experiments. Only two direct dependencies;
+# numpy / tokenizers / safetensors / huggingface_hub arrive with transformers.
+# macOS arm64: the default PyPI wheels include MPS support.
+# Linux + NVIDIA: the default PyPI torch wheel is CUDA-enabled.
 torch==2.13.0
 transformers==5.15.1

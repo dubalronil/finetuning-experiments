@@ -26,7 +26,7 @@ def load_adapter(model, path):
     """
     attach_lora(model)
     state = torch.load(path, map_location=DEVICE)
-    missing, unexpected = model.load_state_dict(state, strict=False)
+    _, unexpected = model.load_state_dict(state, strict=False)
     assert not unexpected, f"checkpoint has keys the model doesn't: {unexpected[:3]}"
 
     # Guard against silently evaluating an untrained adapter: B starts at exactly zero,
@@ -64,7 +64,10 @@ def classify(raw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--adapter", required=True, help="path to a saved epochN.pt")
-    ap.add_argument("--split", default="val", choices=["train", "val", "test", "probe", "diag"])
+    # --split must match --exp: "probe" lives in data/probe_role/, "diag" in data/diag_t8/.
+    ap.add_argument("--split", default="val", choices=["train", "val", "test", "probe", "diag"],
+                    help="split file to read from data/<exp>/; use --exp probe_role with "
+                         "--split probe, and --exp diag_t8 with --split diag")
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--limit", type=int)
     ap.add_argument("--tag", help="output filename tag; defaults to the adapter's stem. "
@@ -120,12 +123,13 @@ def main():
              and str(r["parsed"].get("carrier", "")).strip() == r["target"]["customer"]]
     print(f"  customer/carrier swap  {len(swaps) / n:6.1%}  ({len(swaps)}/{n})")
 
+    swap_ids = {id(r) for r in swaps}
     print("\n  by template")
     for tid in sorted({r["template_id"] for r in records}):
-        rows = [r for r in records if r["template_id"] == tid]
-        sw = sum(1 for r in rows if r in swaps)
-        ex = sum(r["exact"] for r in rows)
-        print(f"    {tid:<4s} exact {ex:3d}/{len(rows):<3d} {ex / len(rows):6.1%}   swaps {sw}")
+        group = [r for r in records if r["template_id"] == tid]
+        sw = sum(1 for r in group if id(r) in swap_ids)
+        ex = sum(r["exact"] for r in group)
+        print(f"    {tid:<4s} exact {ex:3d}/{len(group):<3d} {ex / len(group):6.1%}   swaps {sw}")
 
     fails = [r for r in records if not r["exact"]]
     print(f"\n  failures: {len(fails)}/{n}")
