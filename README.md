@@ -19,12 +19,7 @@ Order #4417 for Priya Raman shipped on 2024-03-08 via FedEx.
 produce:
 
 ```json
-{
-  "order_id": "4417",
-  "customer": "Priya Raman",
-  "ship_date": "2024-03-08",
-  "carrier": "FedEx"
-}
+{"order_id": "4417", "customer": "Priya Raman", "ship_date": "2024-03-08", "carrier": "FedEx"}
 ```
 
 The task is intentionally simple so that failures in formatting, field assignment, and generalization are easy to inspect.
