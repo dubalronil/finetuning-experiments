@@ -2,6 +2,8 @@
 
 A hands-on project for learning how supervised fine-tuning and LoRA work through controlled experiments on a small open-weight language model.
 
+LoRA fine-tunes a model by keeping its original weights frozen and training a small set of extra parameters that adjust its behavior for a specific task.
+
 The project fine-tunes `Qwen/Qwen3-0.6B-Base` to convert shipment sentences into structured JSON. Rather than relying on high-level fine-tuning frameworks, the training pipeline is intentionally small and readable so the full process stays visible: dataset design, prompt/completion masking, LoRA, training, evaluation, and failure analysis.
 
 Each experiment changes one major variable at a time and uses model failures to decide what to test next.
@@ -17,7 +19,12 @@ Order #4417 for Priya Raman shipped on 2024-03-08 via FedEx.
 produce:
 
 ```json
-{"order_id": "4417", "customer": "Priya Raman", "ship_date": "2024-03-08", "carrier": "FedEx"}
+{
+  "order_id": "4417",
+  "customer": "Priya Raman",
+  "ship_date": "2024-03-08",
+  "carrier": "FedEx"
+}
 ```
 
 The task is intentionally simple so that failures in formatting, field assignment, and generalization are easy to inspect.
@@ -39,11 +46,11 @@ The scripts automatically select CUDA, MPS, or CPU depending on the available ha
 
 Using the same Qwen3-0.6B base model and LoRA configuration throughout, I improved zero-shot extraction performance by changing only the training data.
 
-| Experiment | Change | Zero-shot Validation Exact |
-| --- | --- | ---: |
-| Exp001 | Initial 240-example dataset | 40.0% |
-| Exp002 | + carrier-first examples | 93.3% |
-| Exp003 | + role-disambiguation examples | 100.0% |
+| Experiment | Change                         | Zero-shot Validation Exact |
+| ---------- | ------------------------------ | -------------------------: |
+| Exp001     | Initial 240-example dataset    |                      40.0% |
+| Exp002     | + carrier-first examples       |                      93.3% |
+| Exp003     | + role-disambiguation examples |                     100.0% |
 
 The selected Experiment 003 adapter achieved:
 
