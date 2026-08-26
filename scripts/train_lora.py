@@ -1,9 +1,9 @@
-"""Minimal LoRA fine-tune for Experiment 001.
+"""Minimal LoRA fine-tune. Trains on any experiment's data via --exp.
 
 Goal: teach the base model to do the JSON-extraction task ZERO-SHOT, i.e. without
-needing a worked example in the prompt. The base model scores 0% zero-shot but
-100% with a single exemplar, so the knowledge is there - it just needs the output
-format baked in.
+needing a worked example in the prompt. On the 300-example test set the base model
+scores 0% zero-shot, 50% with one exemplar and 100% with two, so the capability is
+there - it just needs the output format baked in rather than demonstrated.
 
 Everything is hand-rolled (no peft / TRL / Trainer) so each mechanical step is
 visible: adapter maths, loss masking, forward, backward, optimizer step.
@@ -23,11 +23,12 @@ import torch.nn.functional as F
 from eval_baseline import (DEVICE, FIELDS, add_exp_arg, build_prompt, generate, load,
                            load_model, parse, use_experiment)
 
-# --- Hyperparameters (see DESIGN.md) ---------------------------------------
+# --- Hyperparameters (see EXPERIMENTS.MD) ----------------------------------
 RANK, ALPHA, DROPOUT = 8, 16, 0.0   # rank 8 -> 1.15M trainable params (0.19% of model)
 LR, BATCH_SIZE, EPOCHS = 2e-4, 8, 3 # LoRA tolerates a much higher LR than full fine-tuning
 WARMUP_STEPS = 10                   # ramp LR from 0 to avoid a destructive first step
 TARGETS = ("q_proj", "v_proj")      # the original LoRA paper's minimal choice
+TRAIN_SEED = 0                      # seeds LoRA init; batch order is seeded separately
 CKPT_ROOT = Path("checkpoints")   # actual dir is CKPT_ROOT/<exp>_lora, chosen in main()
 
 
@@ -75,9 +76,9 @@ def attach_lora(model):
     the freeze, so they keep requires_grad=True and end up as the only trainable
     tensors in the model.
 
-    Returns the trainable parameter count so it can be asserted against expectations -
-    a silent mismatch here (adapters not attached, or base weights left unfrozen) is
-    one of the easiest bugs to miss.
+    Prints and returns the trainable parameter count: a silent mismatch here
+    (adapters not attached, or base weights left unfrozen) is one of the easiest bugs
+    to miss, and the printed line is the cheapest way to catch it.
     """
     for p in model.parameters():
         p.requires_grad_(False)
@@ -156,7 +157,7 @@ def loss_on(model, input_ids, labels, attention_mask):
     FIRST and just they go through lm_head. The vocabulary projection is 151,936 wide,
     so running it at every position would build a ~187MB logits tensor (doubled again
     by .float()) and then throw over half of it away. Gathering first is mathematically
-    identical - verified to agree with the naive version to ~3e-8 - but much cheaper.
+    identical - verified to match the naive full-logits version exactly - but cheaper.
     """
     hidden = model.model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
     h, tgt = hidden[:, :-1, :], labels[:, 1:]
@@ -215,6 +216,11 @@ def main():
     args = ap.parse_args()
 
     use_experiment(args.exp)
+    # Seed BEFORE attach_lora: LoRA's A matrices are drawn from the global torch RNG,
+    # and they are the only unseeded randomness left (the batch order has its own
+    # generator, and dropout is 0). Without this a rerun trains a different adapter.
+    # Experiments 001-003 predate this line - see the note in EXPERIMENTS.MD.
+    torch.manual_seed(TRAIN_SEED)
     # Checkpoints are namespaced by experiment, so a later run cannot overwrite an
     # earlier experiment's adapters.
     ckpt_dir = CKPT_ROOT / f"{args.exp}_lora"
