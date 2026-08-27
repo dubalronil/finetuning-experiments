@@ -266,13 +266,13 @@ Selected checkpoint per rank:
 
 ### Development evaluation
 
-| Rank |   T8 diagnostic |      Role probe |  Pooled | Customer/Carrier Swaps |
-| ---: | --------------: | --------------: | ------: | ---------------------: |
-|    1 | 138/150 (92.0%) | 100/100 (100.0%) | 238/250 |                      0 |
-|    2 | 148/150 (98.7%) |  98/100 (98.0%) | 246/250 |                      0 |
+| Rank |    T8 diagnostic |       Role probe |  Pooled | Customer/Carrier Swaps |
+| ---: | ---------------: | ---------------: | ------: | ---------------------: |
+|    1 |  138/150 (92.0%) | 100/100 (100.0%) | 238/250 |                      0 |
+|    2 |  148/150 (98.7%) |   98/100 (98.0%) | 246/250 |                      0 |
 |    4 | 150/150 (100.0%) | 100/100 (100.0%) | 250/250 |                      0 |
-|    8 | 150/150 (100.0%) |  98/100 (98.0%) | 248/250 |                      0 |
-|   16 | 149/150 (99.3%) | 100/100 (100.0%) | 249/250 |                      0 |
+|    8 | 150/150 (100.0%) |   98/100 (98.0%) | 248/250 |                      0 |
+|   16 |  149/150 (99.3%) | 100/100 (100.0%) | 249/250 |                      0 |
 
 ### Diagnosis
 
@@ -336,7 +336,7 @@ drawn from the global PyTorch RNG, which was left unseeded, so those three runs 
 reproduced exactly. `scripts/train_lora.py` now sets `torch.manual_seed(TRAIN_SEED)` with
 `TRAIN_SEED = 0` before the adapters are attached, making future runs reproducible.
 
-The results recorded above are preserved exactly as measured, before that seed was added.
+The Experiment 001–003 results above are preserved exactly as measured, before that seed was added.
 Re-running Experiments 001–003 with the current code will produce a different adapter
 initialisation and therefore slightly different loss values. The conclusions do not depend
 on those exact numbers — each rests on a large accuracy gap (40.0% → 93.3% → 100.0% on
@@ -350,12 +350,12 @@ used four exemplars, so the runs originally labelled 1-shot and 2-shot were in f
 runs. The bug is fixed and the affected results were re-measured on the same 300-example
 test set:
 
-| Prompt  | JSON validity |            Exact | T9      | T10     |
-| ------- | ------------: | ---------------: | ------- | ------- |
-| 0-shot  |          0.0% |     0/300 (0.0%) | 0/150   | 0/150   |
-| 1-shot  |         50.0% | 150/300 (50.0%)  | 150/150 | 0/150   |
-| 2-shot  |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
-| 4-shot  |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
+| Prompt | JSON validity |            Exact | T9      | T10     |
+| ------ | ------------: | ---------------: | ------- | ------- |
+| 0-shot |          0.0% |     0/300 (0.0%) | 0/150   | 0/150   |
+| 1-shot |         50.0% |  150/300 (50.0%) | 150/150 | 0/150   |
+| 2-shot |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
+| 4-shot |        100.0% | 300/300 (100.0%) | 150/150 | 150/150 |
 
 The 1-shot split is clean rather than random: with a single T1 exemplar the model handles
 T9 perfectly but fails every T10, where the sentence opens with "Tracking for …" and the
