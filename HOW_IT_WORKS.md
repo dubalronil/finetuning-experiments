@@ -86,7 +86,7 @@ The original Qwen3-0.6B parameters stay frozen.
 
 Instead of updating all ~597 million model parameters, small trainable LoRA matrices are attached to parts of the model's attention layers.
 
-For Experiments 001–003:
+How large those matrices are is set by the adapter's rank. At rank 8 with alpha 16, the configuration used in Experiments 001–003:
 
 ```text
 Base model parameters
@@ -98,6 +98,8 @@ Trainable LoRA parameters
 Trainable fraction
 ~0.192%
 ```
+
+Rank is configurable. The trainable parameter count scales linearly with it, at 143,360 parameters per unit of rank.
 
 LoRA is attached to:
 
@@ -158,21 +160,21 @@ The base Qwen model stays frozen.
 
 ## 6. Checkpoints
 
-At the end of each epoch, the learned LoRA parameters are saved as a checkpoint.
+At the end of each epoch, the learned LoRA parameters are saved as a checkpoint, together with the rank and alpha they were trained with so the adapter can be rebuilt exactly.
 
 A checkpoint does not contain another full copy of Qwen.
 
 For example:
 
 ```text
-checkpoints/exp003_lora/epoch2.pt
+checkpoints/exp004_r4/epoch3.pt
 ```
 
 At inference time:
 
     Qwen3-0.6B-Base
             +
-    exp003 epoch-2 LoRA checkpoint
+    Experiment 004 rank-4 epoch-3 LoRA checkpoint
             ↓
        fine-tuned behavior
 
@@ -230,7 +232,7 @@ The same inference path can also be used interactively.
 Running:
 
 ```bash
-python scripts/predict.py --adapter checkpoints/exp003_lora/epoch2.pt
+python scripts/predict.py --adapter checkpoints/exp004_r4/epoch3.pt
 ```
 
 loads:
