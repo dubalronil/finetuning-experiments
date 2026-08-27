@@ -19,7 +19,12 @@ Order #4417 for Priya Raman shipped on 2024-03-08 via FedEx.
 produce:
 
 ```json
-{"order_id": "4417", "customer": "Priya Raman", "ship_date": "2024-03-08", "carrier": "FedEx"}
+{
+  "order_id": "4417",
+  "customer": "Priya Raman",
+  "ship_date": "2024-03-08",
+  "carrier": "FedEx"
+}
 ```
 
 The task is intentionally simple so that failures in formatting, field assignment, and generalization are easy to inspect.
@@ -114,7 +119,8 @@ Evaluate the selected rank-4 epoch-3 adapter on the test set:
 python scripts/eval_adapter.py \
   --exp exp003 \
   --adapter checkpoints/exp004_r4/epoch3.pt \
-  --split test
+  --split test \
+  --tag exp004_r4_epoch3
 ```
 
 Evaluation is zero-shot and uses greedy deterministic decoding.
