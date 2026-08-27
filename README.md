@@ -39,7 +39,7 @@ The scripts automatically select CUDA, MPS, or CPU depending on the available ha
 
 ## Results
 
-Using the same Qwen3-0.6B base model and LoRA configuration throughout, I improved zero-shot extraction performance by changing only the training data.
+Across the first three experiments, using the same Qwen3-0.6B base model and LoRA configuration throughout, I improved zero-shot extraction performance by changing only the training data.
 
 | Experiment | Change                         | Zero-shot Validation Exact |
 | ---------- | ------------------------------ | -------------------------: |
@@ -55,6 +55,8 @@ The selected Experiment 003 adapter achieved:
 - **0 customer/carrier swaps**
 
 A separate 150-example zero-shot T8 diagnostic improved from **92.0% with Experiment 002 to 99.3% with Experiment 003**, while customer/carrier swaps fell from 8 to 0.
+
+Experiment 004 then swept LoRA rank across 1, 2, 4, 8 and 16 on the same 320-example training set. Rank 4 was the smallest rank to reach 100% validation exact accuracy along with a perfect T8 diagnostic and role probe, using **573,440 trainable parameters — about 0.096% of total parameters**. Its final zero-shot test result was **293/300 (97.7%)** with 100% JSON validity.
 
 ## Documentation
 
@@ -86,18 +88,18 @@ python scripts/make_dataset.py
 
 ## Train an adapter
 
-Train Experiment 003:
+Train the selected Experiment 004 rank-4 adapter:
 
 ```bash
-python scripts/train_lora.py --exp exp003
+python scripts/train_lora.py --exp exp003 --rank 4 --ckpt-dir checkpoints/exp004_r4
 ```
 
 This creates local LoRA checkpoints such as:
 
 ```text
-checkpoints/exp003_lora/epoch1.pt
-checkpoints/exp003_lora/epoch2.pt
-checkpoints/exp003_lora/epoch3.pt
+checkpoints/exp004_r4/epoch1.pt
+checkpoints/exp004_r4/epoch2.pt
+checkpoints/exp004_r4/epoch3.pt
 ```
 
 The `checkpoints/` directory is gitignored, so trained adapters are not included in the GitHub repository.
@@ -106,12 +108,12 @@ Anyone cloning the repository must train an adapter locally before using it.
 
 ## Evaluate an adapter
 
-Evaluate the Experiment 003 epoch-2 adapter on the test set:
+Evaluate the selected rank-4 epoch-3 adapter on the test set:
 
 ```bash
 python scripts/eval_adapter.py \
   --exp exp003 \
-  --adapter checkpoints/exp003_lora/epoch2.pt \
+  --adapter checkpoints/exp004_r4/epoch3.pt \
   --split test
 ```
 
@@ -122,7 +124,7 @@ Evaluation is zero-shot and uses greedy deterministic decoding.
 After training an adapter, run the interactive prediction script:
 
 ```bash
-python scripts/predict.py --adapter checkpoints/exp003_lora/epoch2.pt
+python scripts/predict.py --adapter checkpoints/exp004_r4/epoch3.pt
 ```
 
 Then enter your own shipment sentence:
@@ -148,3 +150,5 @@ The biggest lesson from the first three experiments was how strongly fine-tuning
 Instead of immediately changing model size, LoRA rank, or hyperparameters, I kept the training configuration fixed, inspected specific zero-shot failures, formed hypotheses about why they occurred, added targeted training examples, and evaluated again.
 
 This made it possible to connect individual data changes to specific improvements rather than treating fine-tuning as a black box.
+
+The rank sweep added a second lesson: more LoRA capacity was not automatically better. Ranks 8 and 16 showed no measurable advantage over rank 4 on the development evaluations while using two to four times as many trainable parameters.
